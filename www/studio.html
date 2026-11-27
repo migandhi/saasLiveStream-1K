@@ -66,7 +66,7 @@
         <option value="1500000" selected>1.5 Mbps (Balanced 720p)</option>
         <option value="2000000">2.0 Mbps (High 720p)</option>
       </select>
-      <span id="status" class="muted">Offline. For 1,000 viewers & best iOS compatibility, OBS RTMP is recommended.</span>
+      <span id="status" class="muted">Offline. For 1,000 viewers &amp; best iOS compatibility, OBS RTMP is recommended.</span>
     </div>
 
     <div id="obs" class="panel obsbox"></div>
@@ -87,7 +87,6 @@
       <button id="tPoll" onclick="tab('poll')">📊 Live Polls</button>
     </div>
 
-    <!-- CHAT PANE -->
     <div id="pChat" class="pane active">
       <div class="modbar">
         <button id="chatToggleBtn" class="green" onclick="toggleChat()">Chat: ON</button>
@@ -107,7 +106,6 @@
       </div>
     </div>
 
-    <!-- POLL PANE -->
     <div id="pPoll" class="pane">
       <div class="panel">
         <b>Create New Poll</b>
@@ -137,7 +135,6 @@ function tab(name){
   $('pPoll').className='pane'+(name==='poll'?' active':'');
 }
 
-// ---------- Broadcast (OBS & Browser WHIP) ----------
 async function ticket(ttl){ return post('/api/stream/pub-ticket',{ttl:ttl||30}); }
 
 async function obsLink(){
@@ -148,12 +145,12 @@ async function obsLink(){
   $('obs').innerHTML=`
     <b>Option 1 — OBS RTMP (Recommended for 1,000 viewers &amp; iOS/Safari)</b><br>
     Settings → Stream → Service: <b>Custom…</b><br>
-    Server: <code>rtmp://\${host}:1935/live</code><br>
+    Server: <code>rtmp://${host}:1935/live</code><br>
     Stream Key: <code>${t.room}?token=${t.token}</code><br>
     <span class="muted">OBS Output tips: x264 / NVENC, CBR 1200–1500 Kbps, Keyframe Interval: 2s, Audio AAC 96–128 Kbps.</span>
     <hr style="border:0;border-top:1px solid #2a2a2a;margin:8px 0">
     <b>Option 2 — OBS WHIP</b><br>
-    Service: <b>WHIP</b> · Server: <code>${location.origin}/live/${t.room}/whip</code> · Bearer Token: <code>\${t.token}</code><br>
+    Service: <b>WHIP</b> · Server: <code>${location.origin}/live/${t.room}/whip</code> · Bearer Token: <code>${t.token}</code><br>
     <i class="muted">Token valid for 30 minutes, single use.</i>`;
 }
 
@@ -185,7 +182,6 @@ async function startBroadcast(mode){
         sender.setParameters(p);
       }
     });
-    // Prefer H.264 for widest HLS browser compatibility
     const caps=RTCRtpReceiver.getCapabilities?.('video');
     if(caps){
       const h264=caps.codecs.filter(c=>c.mimeType.toLowerCase()==='video/h264');
@@ -199,7 +195,43 @@ async function startBroadcast(mode){
     await new Promise(r=>{if(pc.iceGatheringState==='complete')r();
       else pc.addEventListener('icegatheringstatechange',()=>{if(pc.iceGatheringState==='complete')r();});});
 
-    const resp=await fetch(`/live/\${t.room}/whip?token=${t.token}`,{method:'POST', headers:{'Content-Type':'application/sdp'},body:pc.localDescription.sdp}); if(!resp.ok)throw new Error('Server rejected ('+resp.status+')'); resourceUrl=resp.headers.get('Location'); await pc.setRemoteDescription({type:'answer',sdp:await resp.text()}); $('status').innerText='🟢 Broadcasting via Browser WHIP';$('status').style.color='#4caf50'; $('stopBtn').disabled=false; }catch(e){$('status').innerText='Failed: '+e.message;$('status').style.color='#e53935';stopBroadcast(true);} }  async function stopBroadcast(isErr=false){ if(pc){pc.close();pc=null;} if(localStream){localStream.getTracks().forEach(t=>t.stop());$('localVideo').srcObject=null;localStream=null;} if(resourceUrl&&!isErr){try{await fetch(resourceUrl.startsWith('http')?resourceUrl:location.origin+resourceUrl,{method:'DELETE'});}catch{}} $('startBtn').disabled=false;$('screenBtn').disabled=false;$('stopBtn').disabled=true; if(!isErr){$('status').innerText='Stream ended.';$('status').style.color='#888';} }  // ---------- WebSocket: Chat, Moderation & Polls ---------- function connectWS(){ const proto=location.protocol==='https:'?'wss:':'ws:'; ws=new WebSocket(`${proto}//${location.host}/ws`); ws.onmessage=(ev)=>{ const d=JSON.parse(ev.data); if(d.type==='init'){ updatePresence(d.live,d.viewers); applyState(d.state); $('chatLog').innerHTML=''; d.messages.forEach(appendMsg); renderPoll(d.activePoll); }else if(d.type==='presence'){ updatePresence(d.live,d.viewers); }else if(d.type==='room_state'){ applyState(d.state); }else if(d.type==='chat'){ appendMsg(d.msg); }else if(d.type==='chat_delete'){ document.querySelector(`[data-mid="${d.id}"]`)?.remove();
+    const resp=await fetch(`/live/${t.room}/whip?token=${t.token}`,{method:'POST',
+      headers:{'Content-Type':'application/sdp'},body:pc.localDescription.sdp});
+    if(!resp.ok)throw new Error('Server rejected ('+resp.status+')');
+    resourceUrl=resp.headers.get('Location');
+    await pc.setRemoteDescription({type:'answer',sdp:await resp.text()});
+    $('status').innerText='🟢 Broadcasting via Browser WHIP';$('status').style.color='#4caf50';
+    $('stopBtn').disabled=false;
+  }catch(e){$('status').innerText='Failed: '+e.message;$('status').style.color='#e53935';stopBroadcast(true);}
+}
+
+async function stopBroadcast(isErr=false){
+  if(pc){pc.close();pc=null;}
+  if(localStream){localStream.getTracks().forEach(t=>t.stop());$('localVideo').srcObject=null;localStream=null;}
+  if(resourceUrl&&!isErr){try{await fetch(resourceUrl.startsWith('http')?resourceUrl:location.origin+resourceUrl,{method:'DELETE'});}catch{}}
+  $('startBtn').disabled=false;$('screenBtn').disabled=false;$('stopBtn').disabled=true;
+  if(!isErr){$('status').innerText='Stream ended.';$('status').style.color='#888';}
+}
+
+function connectWS(){
+  const proto=location.protocol==='https:'?'wss:':'ws:';
+  ws=new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onmessage=(ev)=>{
+    const d=JSON.parse(ev.data);
+    if(d.type==='init'){
+      updatePresence(d.live,d.viewers);
+      applyState(d.state);
+      $('chatLog').innerHTML='';
+      d.messages.forEach(appendMsg);
+      renderPoll(d.activePoll);
+    }else if(d.type==='presence'){
+      updatePresence(d.live,d.viewers);
+    }else if(d.type==='room_state'){
+      applyState(d.state);
+    }else if(d.type==='chat'){
+      appendMsg(d.msg);
+    }else if(d.type==='chat_delete'){
+      document.querySelector(`[data-mid="${d.id}"]`)?.remove();
     }else if(d.type==='chat_clear'){
       $('chatLog').innerHTML='';
     }else if(d.type==='poll'){
@@ -229,10 +261,10 @@ function appendMsg(m){
   el.dataset.mid=m.id;
   el.innerHTML=`<div class="meta"><span><b>${esc(m.username)}</b>${isHost?' <span style="color:#64b5f6">[HOST]</span>':''}</span>
     <span class="acts">
-      <button title="Delete" onclick="post('/api/room/chat/delete/\${m.id}')">✕</button>
-      \${!isHost?`<button title="Mute in chat" onclick="post('/api/room/mute/${m.user_id}',{muted:true})">🔇</button>
+      <button title="Delete" onclick="post('/api/room/chat/delete/${m.id}')">✕</button>
+      ${!isHost?`<button title="Mute in chat" onclick="post('/api/room/mute/${m.user_id}',{muted:true})">🔇</button>
       <button title="Kick viewer" onclick="if(confirm('Kick ${esc(m.username)}?'))post('/api/room/kick-viewer/${m.user_id}')">🚫</button>`:''}
-    </span></div><div>\${esc(m.text)}</div>`;
+    </span></div><div>${esc(m.text)}</div>`;
   const log=$('chatLog');
   log.appendChild(el);
   if(log.children.length>200) log.removeChild(log.firstChild);
@@ -263,18 +295,18 @@ function renderPoll(p){
   const bars=p.options.map((opt,i)=>{
     const c=p.counts[i]||0;
     const pct=p.total?Math.round((c/p.total)*100):0;
-    return `<div class="opt-bar"><div class="lbl"><span>\${esc(opt)}</span><span>${c} (${pct}%)</span></div>
-      <div class="bar-bg"><div class="bar-fg" style="width:\${pct}%"></div></div></div>`;
+    return `<div class="opt-bar"><div class="lbl"><span>${esc(opt)}</span><span>${c} (${pct}%)</span></div>
+      <div class="bar-bg"><div class="bar-fg" style="width:${pct}%"></div></div></div>`;
   }).join('');
   $('activePollBox').innerHTML=`<div class="poll-card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-      <b>\${esc(p.question)}</b><span class="badge">\${p.status.toUpperCase()}</span>
+      <b>${esc(p.question)}</b><span class="badge">${p.status.toUpperCase()}</span>
     </div>
-    \${bars}
-    <div class="muted" style="margin-top:8px">Total votes: \${p.total}</div>
+    ${bars}
+    <div class="muted" style="margin-top:8px">Total votes: ${p.total}</div>
     <div style="display:flex;gap:6px;margin-top:8px">
-      \${p.status==='open'?`<button class="gray" onclick="post('/api/room/polls/${p.id}/close')">Close Voting</button>`:''}
-      <button class="red" onclick="post('/api/room/polls/\${p.id}/clear')">Remove Poll</button>
+      ${p.status==='open'?`<button class="gray" onclick="post('/api/room/polls/${p.id}/close')">Close Voting</button>`:''}
+      <button class="red" onclick="post('/api/room/polls/${p.id}/clear')">Remove Poll</button>
     </div></div>`;
 }
 </script></body></html>
