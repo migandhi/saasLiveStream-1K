@@ -1,0 +1,6 @@
+.env
+Caddyfile
+mediamtx.yml
+backend/data/
+backups/
+node_modules/
