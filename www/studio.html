@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Studio — Broadcaster</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0d0d0d;color:#eee;margin:0;height:100vh;display:flex;flex-direction:column}
+  .topbar{display:flex;justify-content:space-between;align-items:center;padding:10px 18px;background:#151515;border-bottom:1px solid #262626}
+  .topbar h1{margin:0;font-size:17px;display:flex;align-items:center;gap:10px}
+  .badge{font-size:12px;padding:3px 9px;border-radius:12px;background:#333;color:#ccc}
+  .badge.live{background:#c62828;color:#fff}
+  .main{flex:1;display:grid;grid-template-columns:1fr 370px;min-height:0}
+  @media(max-width:960px){.main{grid-template-columns:1fr;grid-template-rows:auto 500px;height:auto}}
+  .stage{padding:16px;overflow:auto;display:flex;flex-direction:column;gap:12px}
+  video{width:100%;max-height:60vh;background:#000;border-radius:8px;aspect-ratio:16/9}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  button,select,input{padding:8px 12px;border-radius:6px;border:1px solid #333;background:#1c1c1c;color:#fff;font-size:13px}
+  button{border:0;cursor:pointer;font-weight:600}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .red{background:#e53935}.blue{background:#1565c0}.green{background:#2e7d32}.gray{background:#333}
+  .panel{background:#141414;border:1px solid #252525;border-radius:8px;padding:12px;font-size:13px}
+  .obsbox{display:none;line-height:1.6;word-break:break-all}
+  .obsbox code{background:#090909;padding:2px 6px;border-radius:4px;color:#81c784}
+
+  /* Sidebar: Chat + Polls */
+  .side{border-left:1px solid #262626;background:#121212;display:flex;flex-direction:column;min-height:0}
+  .tabs{display:flex;border-bottom:1px solid #262626}
+  .tabs button{flex:1;border-radius:0;background:#161616;color:#999;padding:11px}
+  .tabs button.active{background:#1f1f1f;color:#fff;border-bottom:2px solid #2196F3}
+  .pane{flex:1;display:none;flex-direction:column;min-height:0;padding:10px;gap:8px}
+  .pane.active{display:flex}
+  .modbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;padding-bottom:8px;border-bottom:1px solid #222}
+  .modbar select,.modbar button{padding:5px 8px;font-size:12px}
+  .chatlog{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-right:4px}
+  .cmsg{background:#1a1a1a;padding:6px 8px;border-radius:6px;font-size:13px;line-height:1.35;position:relative}
+  .cmsg.host{border-left:3px solid #2196F3}
+  .cmsg .meta{font-size:11px;color:#888;display:flex;justify-content:space-between;align-items:center}
+  .cmsg .acts button{background:none;color:#888;padding:0 4px;font-size:11px}
+  .cmsg .acts button:hover{color:#ef5350}
+  .chat-in{display:flex;gap:6px}
+  .chat-in input{flex:1}
+  .poll-card{background:#1a1a1a;border:1px solid #2c2c2c;border-radius:8px;padding:10px}
+  .opt-bar{margin:6px 0}
+  .opt-bar .lbl{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}
+  .bar-bg{height:8px;background:#2a2a2a;border-radius:4px;overflow:hidden}
+  .bar-fg{height:100%;background:#2196F3;transition:width .3s}
+  .muted{color:#888;font-size:12px}
+</style></head><body>
+<div class="topbar">
+  <h1>Live Studio <span id="liveBadge" class="badge">OFFLINE</span> <span id="vCount" class="badge">0 viewers</span></h1>
+  <div>
+    <button class="blue" onclick="obsLink()">OBS Credentials</button>
+    <button class="gray" onclick="location='/sub.html'">← Dashboard</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="stage">
+    <video id="localVideo" autoplay muted playsinline></video>
+    <div class="controls">
+      <button id="startBtn" class="red" onclick="startBroadcast('camera')">🔴 Go Live (Camera)</button>
+      <button id="screenBtn" class="blue" onclick="startBroadcast('screen')">🖥 Go Live (Screen + Mic)</button>
+      <button id="stopBtn" class="gray" onclick="stopBroadcast()" disabled>⏹ Stop</button>
+      <select id="bitrate" title="Video Bitrate">
+        <option value="1000000">1.0 Mbps (Best for 1K / 480p–720p)</option>
+        <option value="1500000" selected>1.5 Mbps (Balanced 720p)</option>
+        <option value="2000000">2.0 Mbps (High 720p)</option>
+      </select>
+      <span id="status" class="muted">Offline. For 1,000 viewers & best iOS compatibility, OBS RTMP is recommended.</span>
+    </div>
+
+    <div id="obs" class="panel obsbox"></div>
+
+    <div class="panel">
+      <b>Pin Announcement to All Viewers</b>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <input id="pinInput" style="flex:1" placeholder="Type an announcement or link to pin above chat…">
+        <button class="blue" onclick="savePin()">Pin</button>
+        <button class="gray" onclick="clearPin()">Clear</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="tabs">
+      <button id="tChat" class="active" onclick="tab('chat')">💬 Live Chat</button>
+      <button id="tPoll" onclick="tab('poll')">📊 Live Polls</button>
+    </div>
+
+    <!-- CHAT PANE -->
+    <div id="pChat" class="pane active">
+      <div class="modbar">
+        <button id="chatToggleBtn" class="green" onclick="toggleChat()">Chat: ON</button>
+        <span>Slow:</span>
+        <select id="slowSel" onchange="setSlow()">
+          <option value="0">Off</option>
+          <option value="5">5s</option>
+          <option value="15">15s</option>
+          <option value="30">30s</option>
+        </select>
+        <button class="red" style="margin-left:auto" onclick="if(confirm('Clear all chat?'))post('/api/room/chat/clear')">Clear</button>
+      </div>
+      <div id="chatLog" class="chatlog"></div>
+      <div class="chat-in">
+        <input id="chatMsg" placeholder="Message viewers as HOST…">
+        <button class="blue" onclick="sendChat()">Send</button>
+      </div>
+    </div>
+
+    <!-- POLL PANE -->
+    <div id="pPoll" class="pane">
+      <div class="panel">
+        <b>Create New Poll</b>
+        <input id="pq" style="width:100%;margin:6px 0" placeholder="Ask a question…">
+        <textarea id="po" style="width:100%;height:84px;background:#0d0d0d;color:#fff;border:1px solid #333;border-radius:6px;padding:7px;font-family:inherit"
+          placeholder="One option per line (2–6 options)&#10;Yes&#10;No&#10;Need more explanation"></textarea>
+        <button class="green" style="width:100%;margin-top:6px" onclick="createPoll()">Launch Poll</button>
+      </div>
+      <div id="activePollBox"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json());
+
+let pc=null,localStream=null,resourceUrl=null,ws=null,roomState={chatEnabled:true,slowMode:0,pinnedMsg:''};
+
+fetch('/api/sub/me').then(r=>{if(r.status!==200)location='/';});
+
+function tab(name){
+  $('tChat').className=name==='chat'?'active':'';
+  $('tPoll').className=name==='poll'?'active':'';
+  $('pChat').className='pane'+(name==='chat'?' active':'');
+  $('pPoll').className='pane'+(name==='poll'?' active':'');
+}
+
+// ---------- Broadcast (OBS & Browser WHIP) ----------
+async function ticket(ttl){ return post('/api/stream/pub-ticket',{ttl:ttl||30}); }
+
+async function obsLink(){
+  const t=await ticket(1800);
+  if(t.error){alert(t.error);return;}
+  const host=location.hostname;
+  $('obs').style.display='block';
+  $('obs').innerHTML=`
+    <b>Option 1 — OBS RTMP (Recommended for 1,000 viewers &amp; iOS/Safari)</b><br>
+    Settings → Stream → Service: <b>Custom…</b><br>
+    Server: <code>rtmp://\${host}:1935/live</code><br>
+    Stream Key: <code>${t.room}?token=${t.token}</code><br>
+    <span class="muted">OBS Output tips: x264 / NVENC, CBR 1200–1500 Kbps, Keyframe Interval: 2s, Audio AAC 96–128 Kbps.</span>
+    <hr style="border:0;border-top:1px solid #2a2a2a;margin:8px 0">
+    <b>Option 2 — OBS WHIP</b><br>
+    Service: <b>WHIP</b> · Server: <code>${location.origin}/live/${t.room}/whip</code> · Bearer Token: <code>\${t.token}</code><br>
+    <i class="muted">Token valid for 30 minutes, single use.</i>`;
+}
+
+async function startBroadcast(mode){
+  const t=await ticket(30);
+  if(t.error){$('status').innerText=t.error;$('status').style.color='#e53935';return;}
+  try{
+    $('status').innerText='Capturing media…';
+    if(mode==='screen'){
+      const scr=await navigator.mediaDevices.getDisplayMedia({video:{width:{max:1280},height:{max:720},frameRate:{max:24}},audio:true});
+      let mic=null;
+      try{ mic=await navigator.mediaDevices.getUserMedia({audio:true}); }catch{}
+      localStream=new MediaStream([...scr.getVideoTracks(), ...(mic?mic.getAudioTracks():scr.getAudioTracks())]);
+    }else{
+      localStream=await navigator.mediaDevices.getUserMedia({
+        video:{width:{ideal:1280,max:1280},height:{ideal:720,max:720},frameRate:{ideal:24,max:30}},audio:true});
+    }
+    $('localVideo').srcObject=localStream;
+    $('startBtn').disabled=true;$('screenBtn').disabled=true;
+
+    pc=new RTCPeerConnection();
+    const maxBps=parseInt($('bitrate').value)||1500000;
+    localStream.getTracks().forEach(tr=>{
+      const sender=pc.addTrack(tr,localStream);
+      if(tr.kind==='video'){
+        const p=sender.getParameters();
+        if(!p.encodings)p.encodings=[{}];
+        p.encodings[0].maxBitrate=maxBps;
+        sender.setParameters(p);
+      }
+    });
+    // Prefer H.264 for widest HLS browser compatibility
+    const caps=RTCRtpReceiver.getCapabilities?.('video');
+    if(caps){
+      const h264=caps.codecs.filter(c=>c.mimeType.toLowerCase()==='video/h264');
+      const rest=caps.codecs.filter(c=>c.mimeType.toLowerCase()!=='video/h264');
+      const vTrans=pc.getTransceivers().find(tr=>tr.sender.track?.kind==='video');
+      if(vTrans?.setCodecPreferences && h264.length) vTrans.setCodecPreferences([...h264,...rest]);
+    }
+
+    const offer=await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await new Promise(r=>{if(pc.iceGatheringState==='complete')r();
+      else pc.addEventListener('icegatheringstatechange',()=>{if(pc.iceGatheringState==='complete')r();});});
+
+    const resp=await fetch(`/live/\${t.room}/whip?token=${t.token}`,{method:'POST', headers:{'Content-Type':'application/sdp'},body:pc.localDescription.sdp}); if(!resp.ok)throw new Error('Server rejected ('+resp.status+')'); resourceUrl=resp.headers.get('Location'); await pc.setRemoteDescription({type:'answer',sdp:await resp.text()}); $('status').innerText='🟢 Broadcasting via Browser WHIP';$('status').style.color='#4caf50'; $('stopBtn').disabled=false; }catch(e){$('status').innerText='Failed: '+e.message;$('status').style.color='#e53935';stopBroadcast(true);} }  async function stopBroadcast(isErr=false){ if(pc){pc.close();pc=null;} if(localStream){localStream.getTracks().forEach(t=>t.stop());$('localVideo').srcObject=null;localStream=null;} if(resourceUrl&&!isErr){try{await fetch(resourceUrl.startsWith('http')?resourceUrl:location.origin+resourceUrl,{method:'DELETE'});}catch{}} $('startBtn').disabled=false;$('screenBtn').disabled=false;$('stopBtn').disabled=true; if(!isErr){$('status').innerText='Stream ended.';$('status').style.color='#888';} }  // ---------- WebSocket: Chat, Moderation & Polls ---------- function connectWS(){ const proto=location.protocol==='https:'?'wss:':'ws:'; ws=new WebSocket(`${proto}//${location.host}/ws`); ws.onmessage=(ev)=>{ const d=JSON.parse(ev.data); if(d.type==='init'){ updatePresence(d.live,d.viewers); applyState(d.state); $('chatLog').innerHTML=''; d.messages.forEach(appendMsg); renderPoll(d.activePoll); }else if(d.type==='presence'){ updatePresence(d.live,d.viewers); }else if(d.type==='room_state'){ applyState(d.state); }else if(d.type==='chat'){ appendMsg(d.msg); }else if(d.type==='chat_delete'){ document.querySelector(`[data-mid="${d.id}"]`)?.remove();
+    }else if(d.type==='chat_clear'){
+      $('chatLog').innerHTML='';
+    }else if(d.type==='poll'){
+      renderPoll(d.poll);
+    }
+  };
+  ws.onclose=()=>setTimeout(connectWS,3000);
+}
+connectWS();
+
+function updatePresence(live,viewers){
+  $('liveBadge').innerText=live?'🔴 LIVE':'OFFLINE';
+  $('liveBadge').className='badge'+(live?' live':'');
+  $('vCount').innerText=`${viewers} viewer${viewers===1?'':'s'}`;
+}
+function applyState(st){
+  roomState=st;
+  $('chatToggleBtn').innerText='Chat: '+(st.chatEnabled?'ON':'OFF');
+  $('chatToggleBtn').className=st.chatEnabled?'green':'red';
+  $('slowSel').value=String(st.slowMode);
+  $('pinInput').value=st.pinnedMsg||'';
+}
+function appendMsg(m){
+  const el=document.createElement('div');
+  const isHost=m.role==='subscriber'||m.role==='admin';
+  el.className='cmsg'+(isHost?' host':'');
+  el.dataset.mid=m.id;
+  el.innerHTML=`<div class="meta"><span><b>${esc(m.username)}</b>${isHost?' <span style="color:#64b5f6">[HOST]</span>':''}</span>
+    <span class="acts">
+      <button title="Delete" onclick="post('/api/room/chat/delete/\${m.id}')">✕</button>
+      \${!isHost?`<button title="Mute in chat" onclick="post('/api/room/mute/${m.user_id}',{muted:true})">🔇</button>
+      <button title="Kick viewer" onclick="if(confirm('Kick ${esc(m.username)}?'))post('/api/room/kick-viewer/${m.user_id}')">🚫</button>`:''}
+    </span></div><div>\${esc(m.text)}</div>`;
+  const log=$('chatLog');
+  log.appendChild(el);
+  if(log.children.length>200) log.removeChild(log.firstChild);
+  log.scrollTop=log.scrollHeight;
+}
+function sendChat(){
+  const txt=$('chatMsg').value.trim();
+  if(!txt||!ws||ws.readyState!==1)return;
+  ws.send(JSON.stringify({type:'chat',text:txt}));
+  $('chatMsg').value='';
+}
+$('chatMsg').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
+
+function toggleChat(){ post('/api/room/settings',{chatEnabled:!roomState.chatEnabled}); }
+function setSlow(){ post('/api/room/settings',{slowMode:parseInt($('slowSel').value)||0}); }
+function savePin(){ post('/api/room/settings',{pinnedMsg:$('pinInput').value}); }
+function clearPin(){ $('pinInput').value=''; post('/api/room/settings',{pinnedMsg:''}); }
+
+async function createPoll(){
+  const question=$('pq').value.trim();
+  const options=$('po').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  const r=await post('/api/room/polls',{question,options});
+  if(r.error){alert(r.error);return;}
+  $('pq').value='';$('po').value='';
+}
+function renderPoll(p){
+  if(!p){$('activePollBox').innerHTML='<p class="muted">No active poll.</p>';return;}
+  const bars=p.options.map((opt,i)=>{
+    const c=p.counts[i]||0;
+    const pct=p.total?Math.round((c/p.total)*100):0;
+    return `<div class="opt-bar"><div class="lbl"><span>\${esc(opt)}</span><span>${c} (${pct}%)</span></div>
+      <div class="bar-bg"><div class="bar-fg" style="width:\${pct}%"></div></div></div>`;
+  }).join('');
+  $('activePollBox').innerHTML=`<div class="poll-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <b>\${esc(p.question)}</b><span class="badge">\${p.status.toUpperCase()}</span>
+    </div>
+    \${bars}
+    <div class="muted" style="margin-top:8px">Total votes: \${p.total}</div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      \${p.status==='open'?`<button class="gray" onclick="post('/api/room/polls/${p.id}/close')">Close Voting</button>`:''}
+      <button class="red" onclick="post('/api/room/polls/\${p.id}/clear')">Remove Poll</button>
+    </div></div>`;
+}
+</script></body></html>
