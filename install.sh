@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# ============================================================
+#  saasLiveStream-1K — Automated Installer (1,000+ Viewers)
+#  Interactive:  sudo ./install.sh
+#  Unattended:   sudo STREAM_DOMAIN=stream.x.com API_DOMAIN=api.x.com \
+#                     ADMIN_PASS='S3cretPass!' ./install.sh --yes
+# ============================================================
+set -euo pipefail
+
+INSTALL_DIR="/opt/saas1k"
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+UNATTENDED=false
+[[ "${1:-}" == "--yes" || "${1:-}" == "-y" ]] && UNATTENDED=true
+
+log()  { echo -e "\e[32m[INSTALL]\e[0m $*"; }
+err()  { echo -e "\e[31m[ERROR]\e[0m $*" >&2; exit 1; }
+
+# ---------- 0. Pre-flight checks ----------
+[[ $EUID -eq 0 ]] || err "Run as root: sudo ./install.sh"
+[[ "$(uname -s)" == "Linux" ]] || err "Linux is required (network_mode: host is Linux-only)."
+grep -qiE "ubuntu|debian" /etc/os-release || log "WARNING: tested on Ubuntu 22.04/24.04 & Debian 12. Continuing…"
+command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl >/dev/null; }
+command -v envsubst >/dev/null || apt-get install -y -qq gettext-base >/dev/null
+command -v rsync >/dev/null || apt-get install -y -qq rsync >/dev/null
+
+# ---------- 1. Collect input parameters ----------
+[[ -f "$INSTALL_DIR/.env" ]] && set -a && source "$INSTALL_DIR/.env" && set +a
+
+ask() {
+  local var="$1" prompt="$2" def="${3:-}"
+  if [[ -z "${!var:-}" ]]; then
+    $UNATTENDED && { [[ -n "$def" ]] && eval "$var=\"$def\"" || err "Missing required parameter: $var"; return; }
+    read -rp "$prompt${def:+ [$def]}: " val
+    eval "$var=\"${val:-$def}\""
+  fi
+}
+
+ask STREAM_DOMAIN "Streaming domain (e.g. stream.example.com)"
+ask API_DOMAIN    "API domain (e.g. api.example.com)"
+ask PUBLIC_IP     "Public IPv4 of this server" "$(curl -4 -s --max-time 5 ifconfig.me || true)"
+ask ADMIN_USER    "Admin username" "admin"
+if [[ -z "${ADMIN_PASS:-}" ]]; then
+  $UNATTENDED && err "ADMIN_PASS is required in unattended mode"
+  read -rsp "Admin password (min 8 chars): " ADMIN_PASS; echo
+fi
+[[ ${#ADMIN_PASS} -ge 8 ]] || err "Admin password must be at least 8 characters."
+[[ -n "$PUBLIC_IP" ]] || err "Could not detect public IP — set PUBLIC_IP manually."
+
+# ---------- 2. Verify DNS (warn only) ----------
+for d in "$STREAM_DOMAIN" "$API_DOMAIN"; do
+  resolved=$(getent hosts "$d" | awk '{print $1}' | head -1 || true)
+  [[ "$resolved" == "$PUBLIC_IP" ]] || log "WARNING: DNS for $d resolves to '${resolved:-nothing}', expected $PUBLIC_IP. TLS will fail until DNS points here."
+done
+
+# ---------- 3. Tune Linux kernel for 1,000+ concurrent viewers ----------
+log "Applying Linux networking & concurrency tuning (TCP BBR + buffers)…"
+cat > /etc/sysctl.d/99-saas1k.conf <<'EOF'
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+net.core.somaxconn = 65535
+net.ipv4.tcp_max_syn_backlog = 16384
+net.core.netdev_max_backlog = 16384
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+net.ipv4.ip_local_port_range = 10240 65535
+fs.file-max = 2097152
+EOF
+sysctl --system >/dev/null 2>&1 || log "NOTE: Some sysctl values skipped (normal on restricted VPS kernels)."
+
+# ---------- 4. Install Docker (if missing) ----------
+if ! command -v docker >/dev/null; then
+  log "Installing Docker…"
+  curl -fsSL https://get.docker.com | sh
+fi
+docker compose version >/dev/null 2>&1 || err "Docker Compose plugin missing. Install docker-compose-plugin."
+
+# ---------- 5. Configure firewall (ufw, if present) ----------
+if command -v ufw >/dev/null; then
+  log "Configuring firewall (ufw)…"
+  ufw allow 22/tcp   >/dev/null   # SSH
+  ufw allow 80/tcp   >/dev/null   # HTTP (Let's Encrypt + redirect)
+  ufw allow 443/tcp  >/dev/null   # HTTPS (Portal, HLS, WebSocket, WHIP)
+  ufw allow 443/udp  >/dev/null   # HTTP/3 (QUIC)
+  ufw allow 1935/tcp >/dev/null   # OBS RTMP ingest (recommended)
+  ufw allow 8189/udp >/dev/null   # Browser/OBS WebRTC WHIP ingest
+  ufw allow 8189/tcp >/dev/null   # WebRTC TCP fallback
+  ufw --force enable >/dev/null
+else
+  log "ufw not found — open 80/tcp, 443/tcp, 443/udp, 1935/tcp, 8189/udp, 8189/tcp in your cloud firewall."
+fi
+
+# ---------- 6. Deploy files ----------
+log "Deploying to $INSTALL_DIR…"
+mkdir -p "$INSTALL_DIR"
+rsync -a --exclude '.git' --exclude 'backend/data' "$REPO_DIR/" "$INSTALL_DIR/"
+mkdir -p "$INSTALL_DIR/backend/data"
+
+# ---------- 7. Write .env & generate configs ----------
+cat > "$INSTALL_DIR/.env" <<EOF
+STREAM_DOMAIN=$STREAM_DOMAIN
+API_DOMAIN=$API_DOMAIN
+PUBLIC_IP=$PUBLIC_IP
+ADMIN_USER=$ADMIN_USER
+ADMIN_PASS=$ADMIN_PASS
+EOF
+chmod 600 "$INSTALL_DIR/.env"
+
+export STREAM_DOMAIN API_DOMAIN PUBLIC_IP
+envsubst '${API_DOMAIN} ${STREAM_DOMAIN}' < "$INSTALL_DIR/templates/Caddyfile.tpl"    > "$INSTALL_DIR/Caddyfile"
+envsubst '${PUBLIC_IP}'                    < "$INSTALL_DIR/templates/mediamtx.yml.tpl" > "$INSTALL_DIR/mediamtx.yml"
+
+# ---------- 8. Build & start ----------
+log "Building and starting containers (first build takes 1–3 minutes)…"
+cd "$INSTALL_DIR"
+docker compose up -d --build
+
+# ---------- 9. Health check ----------
+log "Waiting for backend…"
+for i in {1..30}; do
+  curl -s -o /dev/null http://127.0.0.1:3000/api/health && break || sleep 2
+done
+
+log "============================================================"
+log " ✅ saasLiveStream-1K installation complete!"
+log ""
+log "   Portal (login/watch):   https://$STREAM_DOMAIN"
+log "   Admin panel:            https://$STREAM_DOMAIN/admin.html"
+log "   Admin user:             $ADMIN_USER"
+log "   OBS RTMP Ingest:        rtmp://$STREAM_DOMAIN:1935/live"
+log ""
+log "   ⏳ TLS certificates issue automatically on first visit."
+log "   Logs:     cd $INSTALL_DIR && docker compose logs -f"
+log "   Upgrade:  sudo ./upgrade.sh"
+log "============================================================"
