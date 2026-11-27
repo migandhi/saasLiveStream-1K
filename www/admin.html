@@ -23,7 +23,7 @@
   <div><span id="tot"></span>
   <button class="b gr" onclick="fetch('/api/logout',{method:'POST'}).then(()=>location='/')">Logout</button></div></div>
 
-<div class="card"><h3>Capacity & Concurrency Controls</h3>
+<div class="card"><h3>Capacity &amp; Concurrency Controls</h3>
   <div class="grid">
     <label>Max simultaneous streams <input id="maxConcurrentStreams" type="number"></label>
     <label>Extra stream if viewers under <input id="extraStreamViewerThreshold" type="number"></label>
@@ -52,54 +52,33 @@ async function load(){
   const r=await fetch('/api/admin/subscribers');
   if(r.status!==200){location='/';return;}
   const d=await r.json();
-  $('tot').innerText=`Live: \${d.totals.liveStreams} stream(s) · ${d.totals.totalViewers} watching`; for(const k of KEYS) if(document.activeElement!==$(k)) $(k).value=d.settings[k]; $('tb').innerHTML=d.subscribers.map(s=>{ const st=s.expired?'expired':s.status; const cls=st==='active'?'act':st==='pending'?'pen':'sus'; return `<tr><td>${s.id}</td><td>${esc(s.username)}</td><td>${esc(s.contact)}</td>
+  $('tot').innerText=`Live: ${d.totals.liveStreams} stream(s) · ${d.totals.totalViewers} watching`;
+  for(const k of KEYS) if(document.activeElement!==$(k)) $(k).value=d.settings[k];
+  $('tb').innerHTML=d.subscribers.map(s=>{
+    const st=s.expired?'expired':s.status;
+    const cls=st==='active'?'act':st==='pending'?'pen':'sus';
+    return `<tr><td>${s.id}</td><td>${esc(s.username)}</td><td>${esc(s.contact)}</td>
     <td><span class="pill ${cls}">${st}</span></td>
-    <td>\${s.expires_at?new Date(s.expires_at*1000).toISOString().slice(0,10):'—'}</td>
-    <td>\${s.users}</td>
-    <td>\${s.live?`<span class="pill live">LIVE · ${s.viewers}</span>`:'offline'}</td>
+    <td>${s.expires_at?new Date(s.expires_at*1000).toISOString().slice(0,10):'—'}</td>
+    <td>${s.users}</td>
+    <td>${s.live?`<span class="pill live">LIVE · ${s.viewers}</span>`:'offline'}</td>
     <td>
-      \${s.status==='pending'?`<button class="b g" onclick="act(${s.id},'approve')">Approve</button>`:''}
-      <button class="b bl" onclick="act(\${s.id},'renew')">Renew</button>
-      \${s.status!=='suspended'?`<button class="b r" onclick="act(${s.id},'suspend')">Suspend</button>`
+      ${s.status==='pending'?`<button class="b g" onclick="act(${s.id},'approve')">Approve</button>`:''}
+      <button class="b bl" onclick="act(${s.id},'renew')">Renew</button>
+      ${s.status!=='suspended'?`<button class="b r" onclick="act(${s.id},'suspend')">Suspend</button>`
         :`<button class="b g" onclick="act(${s.id},'renew')">Reactivate</button>`}
-      \${s.live?`<button class="b r" onclick="api('/api/admin/kick/${s.id}').then(load)">Kick</button>`:''}
+      ${s.live?`<button class="b r" onclick="api('/api/admin/kick/${s.id}').then(load)">Kick</button>`:''}
       <button class="b gr" onclick="if(confirm('Delete ${esc(s.username)} and all their users?'))act(${s.id},'delete')">Delete</button>
     </td></tr>`;}).join('');
 }
 async function act(id,a){
   const b=(a==='approve'||a==='renew')?{days:days()}:{};
-  await api(`/api/admin/subscribers/\${id}/${a}`,b); load(); } async function saveSettings(){ const body={}; for(const k of KEYS) body[k]=$(k).value; await api('/api/admin/settings',body); $('note').innerText='Saved ✓'; setTimeout(()=>$('note').innerText='',1500); } load(); setInterval(load,5000); </script></body></html> ```  #### `www/sub.html` ```html <!DOCTYPE html> <html lang="en"><head> <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>Broadcaster Dashboard</title> <style> body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0a0a0a;color:#eee;margin:0;padding:24px} .wrap{max-width:960px;margin:0 auto;display:flex;flex-direction:column;gap:18px} .card{background:#141414;border:1px solid #262626;border-radius:10px;padding:20px} .top{display:flex;justify-content:space-between;align-items:center} h1{font-size:20px;margin:0} h3{margin:0 0 14px;font-size:15px;color:#bbb} .b{padding:8px 14px;border:0;border-radius:6px;cursor:pointer;color:#fff;font-size:13px;margin:2px} .g{background:#2e7d32}.r{background:#c62828}.bl{background:#1565c0}.gr{background:#424242} input,textarea{padding:8px;border-radius:6px;border:1px solid #333;background:#0d0d0d;color:#fff;font-size:14px} table{width:100\%;border-collapse:collapse;font-size:14px} td,th{padding:7px 8px;border-bottom:1px solid #222;text-align:left} th{color:#777;font-weight:normal} .pill{padding:2px 8px;border-radius:10px;font-size:12px} .act{background:#2e7d32}.sus{background:#424242}.live{background:#c62828} .muted{color:#888;font-size:13px} textarea{width:100\%;box-sizing:border-box;height:100px} </style></head><body> <div class="wrap"> <div class="top"><h1>Broadcaster Dashboard</h1> <div> <button class="b r" onclick="location='/studio.html'">🔴 Open Live Studio</button> <button class="b gr" onclick="fetch('/api/logout',{method:'POST'}).then(()=>location='/')">Logout</button> </div></div>  <div class="card"><h3>Account</h3><div id="acct" class="muted">Loading…</div> <p class="muted">Viewers sign in at <b id="watchUrl"></b> — single session per account (anti-sharing) with live chat & polls.</p></div>  <div class="card"><h3>Schedule a Broadcast Slot</h3> <div class="muted" id="quota" style="margin-bottom:10px"></div> <input id="st" placeholder="Session Title" style="width:220px"> <input id="sd" type="datetime-local"> <input id="sm" type="number" value="240" style="width:75px" title="minutes"> min <button class="b bl" onclick="addSched()">Book slot</button> <span id="smsg" style="color:#e57373;font-size:13px"></span> <table style="margin-top:12px"><tbody id="schedTb"></tbody></table></div>  <div class="card"><h3>Viewer Accounts (<span id="ucnt">0</span>)</h3> <input id="nu" placeholder="username"><input id="np" placeholder="password"> <button class="b g" onclick="addUser()">Add user</button> <button class="b bl" onclick="location='/api/sub/users.csv'">Export CSV</button> <span id="umsg" class="muted"></span> <div style="max-height:300px;overflow:auto;margin-top:12px"> <table><thead><tr><th>Username</th><th>Status</th><th></th></tr></thead> <tbody id="userTb"></tbody></table> </div> <h3 style="margin-top:18px">Bulk Import CSV (up to 2,000 rows: username,password per line)</h3> <textarea id="csv" placeholder="student1,pass1234&#10;student2,pass5678"></textarea> <button class="b g" onclick="importCsv()">Import</button> <span id="imsg" class="muted"></span></div> </div> <script> const $=id=>document.getElementById(id); const esc=s=>String(s\vert{}\vert{}'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'}, body:JSON.stringify(b\vert{}\vert{}{})}).then(r=>r.json()); $('watchUrl').innerText=location.origin;  async function loadMe(){ const r=await fetch('/api/sub/me'); if(r.status!==200){location='/';return;} const m=await r.json(); $('acct').innerHTML=`<b>${esc(m.username)}</b> — status: <span class="pill ${m.active?'act':'sus'}">${m.active?'active':'inactive'}</span>
-   · expires: \${m.expires_at?new Date(m.expires_at*1000).toISOString().slice(0,10):'—'}
-   ${m.live?` · <span class="pill live">LIVE — ${m.viewers} watching</span>`:''}`; } async function loadUsers(){ const u=await (await fetch('/api/sub/users')).json(); $('ucnt').innerText=u.length; $('userTb').innerHTML=u.map(x=>`<tr><td>${esc(x.username)}</td>
-   <td><span class="pill ${x.status==='active'?'act':'sus'}">${x.status}</span></td>
-   <td><button class="b gr" onclick="post('/api/sub/users/${x.id}/toggle').then(loadUsers)">${x.status==='active'?'Suspend':'Activate'}</button>
-   <button class="b r" onclick="if(confirm('Delete ${esc(x.username)}?'))post('/api/sub/users/${x.id}/delete').then(loadUsers)">Delete</button></td></tr>`).join('');
+  await api(`/api/admin/subscribers/${id}/${a}`,b); load();
 }
-async function addUser(){
-  const d=await post('/api/sub/users',{username:$('nu').value,password:$('np').value});
-  $('umsg').innerText=d.error||'Added ✓'; if(d.ok){$('nu').value='';$('np').value='';loadUsers();}
+async function saveSettings(){
+  const body={}; for(const k of KEYS) body[k]=$(k).value;
+  await api('/api/admin/settings',body);
+  $('note').innerText='Saved ✓'; setTimeout(()=>$('note').innerText='',1500);
 }
-async function importCsv(){
-  $('imsg').innerText='Importing…';
-  const d=await post('/api/sub/users/import',{csv:$('csv').value});
-  $('imsg').innerText=`Added ${d.added}.${d.errors.length?'Errors: '+d.errors.slice(0,5).join(' | '):''}`;
-  loadUsers();
-}
-async function loadSched(){
-  const me=await (await fetch('/api/sub/me')).json();
-  $('quota').innerText=`Bookings: ${me.bookingsUsed}/${me.bookingsMax} · Max slot: \${me.maxSlotMinutes} min`
-    +(me.requireSchedule?' · Slot required to go live.':' · Open schedule (can go live anytime).');
-  const s=await (await fetch('/api/sub/slots')).json();
-  $('schedTb').innerHTML=s.map(x=>`<tr style="\${x.mine?'':'color:#666'}">
-   <td>\${x.mine?'🟢 '+esc(x.title):'⛔ Booked'}</td>
-   <td>${new Date(x.starts_at*1000).toLocaleString()}</td><td>${x.minutes} min</td>
-   <td>\${x.mine?`<button class="b r" onclick="post('/api/sub/schedules/${x.id}/delete').then(loadSched)">✕</button>`:''}</td>
-  </tr>`).join('') || '<tr><td class="muted">No upcoming bookings</td></tr>';
-}
-async function addSched(){
-  const t=new Date($('sd').value).getTime()/1000;
-  const d=await post('/api/sub/schedules',{title:$('st').value,starts_at:t,minutes:$('sm').value});
-  $('smsg').innerText=d.error||''; if(d.ok){$('st').value='';loadSched();}
-}
-loadMe();loadUsers();loadSched();setInterval(loadMe,7000);
+load(); setInterval(load,5000);
 </script></body></html>
