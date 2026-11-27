@@ -77,7 +77,7 @@ Wait for DNS propagation (`ping stream.yourdomain.com`) before running the insta
 
 ### Interactive
 ```bash
-git clone [https://github.com/YOUR_USERNAME/saasLiveStream-1K.git](https://github.com/YOUR_USERNAME/saasLiveStream-1K.git)
+git clone [https://github.com/migandhi/saasLiveStream-1K.git](https://github.com/migandhi/saasLiveStream-1K.git)
 cd saasLiveStream-1K
 chmod +x install.sh upgrade.sh
 sudo ./install.sh
