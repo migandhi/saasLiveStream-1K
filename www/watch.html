@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Broadcast</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.4/dist/hls.min.js"></script>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0a0a0a;color:#eee;margin:0;height:100vh;display:flex;flex-direction:column}
+  .topbar{display:flex;justify-content:space-between;align-items:center;padding:10px 18px;background:#141414;border-bottom:1px solid #242424}
+  .topbar .left{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px}
+  .pill{font-size:12px;padding:3px 9px;border-radius:12px;background:#2a2a2a;color:#bbb}
+  .pill.live{background:#c62828;color:#fff}
+  .btn{background:#333;color:#ddd;border:0;border-radius:6px;padding:7px 12px;cursor:pointer;font-size:13px}
+  .main{flex:1;display:grid;grid-template-columns:1fr 350px;min-height:0}
+  @media(max-width:900px){.main{grid-template-columns:1fr;grid-template-rows:auto 1fr;height:auto}}
+  .stage{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;background:#000;position:relative}
+  .player-wrap{width:100%;max-width:1280px;position:relative}
+  video{width:100%;background:#111;border-radius:8px;aspect-ratio:16/9;display:block}
+  #overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.85);border-radius:8px;text-align:center;padding:24px}
+  #overlay h2{margin:0 0 8px;color:#2196F3}
+  #overlay p{margin:0;color:#ccc;white-space:pre-wrap;line-height:1.5}
+  .spinner{display:inline-block;width:22px;height:22px;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;margin-top:12px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #unmuteBtn{position:absolute;bottom:56px;left:50%;transform:translateX(-50%);background:#2196F3;color:#fff;border:0;border-radius:20px;padding:8px 18px;font-weight:600;cursor:pointer;display:none;z-index:5}
+
+  /* Sidebar: Polls + Live Chat */
+  .side{border-left:1px solid #242424;background:#121212;display:flex;flex-direction:column;min-height:0}
+  .pin{background:#1b263b;color:#bbdefb;padding:8px 12px;font-size:13px;border-bottom:1px solid #263859;display:none}
+  .pollbox{padding:10px;border-bottom:1px solid #242424;background:#161616;display:none}
+  .poll-q{font-weight:600;font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between}
+  .popt{width:100%;text-align:left;background:#222;color:#fff;border:1px solid #333;border-radius:6px;padding:7px 10px;margin:4px 0;cursor:pointer;position:relative;overflow:hidden;font-size:13px}
+  .popt:hover:not(:disabled){border-color:#2196F3}
+  .popt:disabled{cursor:default}
+  .popt .fill{position:absolute;left:0;top:0;bottom:0;background:rgba(33,150,243,.28);z-index:0;transition:width .3s}
+  .popt .row{position:relative;z-index:1;display:flex;justify-content:space-between}
+  .popt.mine{border-color:#4caf50}
+  .chat-hdr{padding:8px 12px;font-size:12px;color:#888;border-bottom:1px solid #222;display:flex;justify-content:space-between}
+  .chatlog{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:6px}
+  .cmsg{font-size:13px;line-height:1.4;word-break:break-word}
+  .cmsg b{color:#90caf9}.cmsg.host b{color:#ffb74d}
+  .cmsg.sys{color:#e57373;font-size:12px}
+  .chat-in{padding:10px;border-top:1px solid #242424;display:flex;gap:6px}
+  .chat-in input{flex:1;padding:9px;border-radius:6px;border:1px solid #333;background:#0d0d0d;color:#fff;font-size:13px}
+  .chat-in button{background:#2196F3;color:#fff;border:0;border-radius:6px;padding:0 14px;font-weight:600;cursor:pointer}
+</style></head><body>
+<div class="topbar">
+  <div class="left">
+    <span id="liveBadge" class="pill">WAITING</span>
+    <span id="vCount" class="pill">0 watching</span>
+  </div>
+  <button class="btn" onclick="fetch('/api/logout',{method:'POST'}).then(()=>location='/')">Logout</button>
+</div>
+
+<div class="main">
+  <div class="stage">
+    <div class="player-wrap">
+      <video id="v" controls playsinline autoplay muted></video>
+      <button id="unmuteBtn" onclick="unmute()">🔊 Tap to Unmute</button>
+      <div id="overlay"><div><h2 id="ot">Connecting…</h2><p id="ox"></p><div id="sp" class="spinner"></div></div></div>
+    </div>
+  </div>
+
+  <div class="side">
+    <div id="pin" class="pin"></div>
+    <div id="pollBox" class="pollbox"></div>
+    <div class="chat-hdr"><span>LIVE CHAT</span><span id="chatStatus"></span></div>
+    <div id="chatLog" class="chatlog"></div>
+    <div class="chat-in">
+      <input id="chatInput" placeholder="Say something…" maxlength="400">
+      <button id="sendBtn" onclick="sendChat()">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+let hls=null,ws=null,playing=false,kicked=false,myVote=null,currentPoll=null,roomState={chatEnabled:true,slowMode:0};
+
+fetch('/api/me').then(r=>{if(r.status!==200)location='/';});
+
+function showOverlay(title,text,isErr=false,spin=false){
+  $('overlay').style.display='flex';
+  $('ot').innerText=title;
+  $('ot').style.color=isErr?'#e53935':'#2196F3';
+  $('ox').innerText=text;
+  $('sp').style.display=spin?'inline-block':'none';
+}
+function hideOverlay(){ $('overlay').style.display='none'; }
+
+function unmute(){ const v=$('v'); v.muted=false; v.play().catch(()=>{}); $('unmuteBtn').style.display='none'; }
+
+function stopPlayer(){
+  playing=false;
+  if(hls){hls.destroy();hls=null;}
+  const v=$('v'); v.removeAttribute('src'); v.load();
+  $('unmuteBtn').style.display='none';
+}
+
+async function startPlayback(){
+  if(kicked || playing) return;
+  let t;
+  try{
+    const r=await fetch('/api/stream/view-ticket',{method:'POST'});
+    if(r.status===401){location='/';return;}
+    t=await r.json();
+  }catch{ showOverlay('Reconnecting…','Checking stream status…',false,true); setTimeout(startPlayback,4000); return; }
+
+  if(t.error){ showOverlay('Unavailable',t.error,true,false); return; }
+  if(!t.live){
+    const nxt=t.next?`\nNext broadcast: ${t.next.title}\n${new Date(t.next.starts_at*1000).toLocaleString()}`:'';
+    showOverlay('Waiting Room','The broadcast has not started yet.\nPlayback will begin automatically.'+nxt,false,true);
+    return;
+  }
+
+  playing=true;
+  hideOverlay();
+  const v=$('v');
+  const url=`/live/${t.room}/index.m3u8?token=${encodeURIComponent(t.token)}`;
+
+  if(window.Hls && Hls.isSupported()){
+    hls=new Hls({
+      lowLatencyMode:true,
+      backBufferLength:20,
+      liveSyncDurationCount:3,
+      liveMaxLatencyDurationCount:6,
+      xhrSetup(xhr){
+        xhr.withCredentials=true;
+        xhr.setRequestHeader('Authorization','Bearer '+t.token);
+      }
+    });
+    hls.on(Hls.Events.MEDIA_ATTACHED,()=>hls.loadSource(url));
+    hls.on(Hls.Events.MANIFEST_PARSED,()=>{
+      v.play().then(()=>{ if(v.muted) $('unmuteBtn').style.display='block'; }).catch(()=>{$('unmuteBtn').style.display='block';});
+    });
+    hls.on(Hls.Events.ERROR,(_,data)=>{
+      if(data.fatal){
+        stopPlayer();
+        showOverlay('Reconnecting…','Stream interrupted, retrying…',false,true);
+        setTimeout(startPlayback,3000);
+      }
+    });
+    v.onplay=()=>{ if(hls && hls.liveSyncPosition) v.currentTime=hls.liveSyncPosition; };
+    hls.attachMedia(v);
+  }else if(v.canPlayType('application/vnd.apple.mpegurl')){
+    // Native iOS Safari fallback
+    v.src=url;
+    v.play().then(()=>{ if(v.muted) $('unmuteBtn').style.display='block'; }).catch(()=>{$('unmuteBtn').style.display='block';});
+  }else{
+    showOverlay('Unsupported Browser','Please use Chrome, Edge, Firefox, or Safari.',true,false);
+  }
+}
+
+// ---------- WebSocket: Real-Time Presence, Chat & Polls ----------
+function connectWS(){
+  if(kicked) return;
+  const proto=location.protocol==='https:'?'wss:':'ws:';
+  ws=new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onmessage=(ev)=>{
+    const d=JSON.parse(ev.data);
+    if(d.type==='init'){
+      applyPresence(d.live,d.viewers);
+      applyState(d.state,d.muted);
+      $('chatLog').innerHTML='';
+      d.messages.forEach(appendMsg);
+      myVote=d.myVote;
+      renderPoll(d.activePoll);
+      if(d.live) startPlayback(); else startPlayback(); // populates waiting room with schedule
+    }else if(d.type==='presence'){
+      applyPresence(d.live,d.viewers);
+      if(d.live && !playing) startPlayback();
+      if(!d.live && playing){ stopPlayer(); startPlayback(); }
+    }else if(d.type==='room_state'){
+      applyState(d.state);
+    }else if(d.type==='muted'){
+      applyState(roomState,d.muted);
+    }else if(d.type==='chat'){
+      appendMsg(d.msg);
+    }else if(d.type==='chat_delete'){
+      document.querySelector(`[data-mid="${d.id}"]`)?.remove(); }else if(d.type==='chat_clear'){ $('chatLog').innerHTML=''; }else if(d.type==='poll'){ if(!d.poll \vert{}\vert{} (currentPoll && currentPoll.id!==d.poll.id)) myVote=null; renderPoll(d.poll); }else if(d.type==='vote_ok'){ myVote=d.optionIdx; if(currentPoll && currentPoll.id===d.pollId) renderPoll(currentPoll); }else if(d.type==='err'){ appendSys(d.message); }else if(d.type==='kicked'){ kicked=true; stopPlayer(); showOverlay('Disconnected',d.reason\vert{}\vert{}'Your session ended.',true,false); } }; ws.onclose=()=>{ if(!kicked) setTimeout(connectWS,3000); }; } connectWS();  function applyPresence(live,viewers){ $('liveBadge').innerText=live?'🔴 LIVE':'WAITING'; $('liveBadge').className='pill'+(live?' live':''); $('vCount').innerText=`${viewers} watching`;
+}
+function applyState(st,muted){
+  roomState=st;
+  if(st.pinnedMsg){ $('pin').style.display='block'; $('pin').innerText='📌 '+st.pinnedMsg; }
+  else $('pin').style.display='none';
+
+  const disabled=!st.chatEnabled || !!muted;
+  $('chatInput').disabled=disabled; $('sendBtn').disabled=disabled;
+  $('chatInput').placeholder=muted?'You are muted':(!st.chatEnabled?'Chat is disabled':'Say something…');
+  $('chatStatus').innerText=!st.chatEnabled?'Disabled':(st.slowMode?`Slow: ${st.slowMode}s`:'Open'); } function appendMsg(m){ const log=$('chatLog'); const nearBottom=log.scrollHeight-log.scrollTop-log.clientHeight<60; const el=document.createElement('div'); const isHost=m.role==='subscriber'\vert{}\vert{}m.role==='admin'; el.className='cmsg'+(isHost?' host':''); el.dataset.mid=m.id; el.innerHTML=`<b>${esc(m.username)}${isHost?' [HOST]':''}:</b>${esc(m.text)}`;
+  log.appendChild(el);
+  if(log.children.length>200) log.removeChild(log.firstChild);
+  if(nearBottom) log.scrollTop=log.scrollHeight;
+}
+function appendSys(text){
+  const el=document.createElement('div');
+  el.className='cmsg sys'; el.innerText=text;
+  const log=$('chatLog'); log.appendChild(el); log.scrollTop=log.scrollHeight;
+}
+function sendChat(){
+  const txt=$('chatInput').value.trim();
+  if(!txt||!ws||ws.readyState!==1)return;
+  ws.send(JSON.stringify({type:'chat',text:txt}));
+  $('chatInput').value='';
+}
+$('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
+
+function renderPoll(p){
+  currentPoll=p;
+  if(!p){ $('pollBox').style.display='none'; return; }
+  $('pollBox').style.display='block';
+  const showResults=myVote!==null || p.status==='closed';
+  const optsHtml=p.options.map((opt,i)=>{
+    const c=p.counts[i]||0;
+    const pct=p.total?Math.round((c/p.total)*100):0;
+    const mine=myVote===i;
+    return `<button class="popt ${mine?'mine':''}" ${showResults?'disabled':''} onclick="vote(${p.id},${i})">
+      \${showResults?`<div class="fill" style="width:${pct}%"></div>`:''}
+      <div class="row"><span>\${mine?'✓ ':''}${esc(opt)}</span>${showResults?`<span>${pct}% (${c})</span>`:''}</div>
+    </button>`;
+  }).join('');
+  $('pollBox').innerHTML=`<div class="poll-q"><span>📊 \${esc(p.question)}</span><span style="color:#888">${p.status==='closed'?'Closed':p.total+' votes'}</span></div>${optsHtml}`;
+}
+function vote(pollId,optionIdx){
+  if(!ws||ws.readyState!==1)return;
+  ws.send(JSON.stringify({type:'vote',pollId,optionIdx}));
+}
+</script></body></html>
