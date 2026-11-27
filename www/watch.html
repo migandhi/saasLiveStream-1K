@@ -143,7 +143,6 @@ async function startPlayback(){
     v.onplay=()=>{ if(hls && hls.liveSyncPosition) v.currentTime=hls.liveSyncPosition; };
     hls.attachMedia(v);
   }else if(v.canPlayType('application/vnd.apple.mpegurl')){
-    // Native iOS Safari fallback
     v.src=url;
     v.play().then(()=>{ if(v.muted) $('unmuteBtn').style.display='block'; }).catch(()=>{$('unmuteBtn').style.display='block';});
   }else{
@@ -151,7 +150,6 @@ async function startPlayback(){
   }
 }
 
-// ---------- WebSocket: Real-Time Presence, Chat & Polls ----------
 function connectWS(){
   if(kicked) return;
   const proto=location.protocol==='https:'?'wss:':'ws:';
@@ -165,7 +163,7 @@ function connectWS(){
       d.messages.forEach(appendMsg);
       myVote=d.myVote;
       renderPoll(d.activePoll);
-      if(d.live) startPlayback(); else startPlayback(); // populates waiting room with schedule
+      startPlayback();
     }else if(d.type==='presence'){
       applyPresence(d.live,d.viewers);
       if(d.live && !playing) startPlayback();
@@ -177,7 +175,31 @@ function connectWS(){
     }else if(d.type==='chat'){
       appendMsg(d.msg);
     }else if(d.type==='chat_delete'){
-      document.querySelector(`[data-mid="${d.id}"]`)?.remove(); }else if(d.type==='chat_clear'){ $('chatLog').innerHTML=''; }else if(d.type==='poll'){ if(!d.poll \vert{}\vert{} (currentPoll && currentPoll.id!==d.poll.id)) myVote=null; renderPoll(d.poll); }else if(d.type==='vote_ok'){ myVote=d.optionIdx; if(currentPoll && currentPoll.id===d.pollId) renderPoll(currentPoll); }else if(d.type==='err'){ appendSys(d.message); }else if(d.type==='kicked'){ kicked=true; stopPlayer(); showOverlay('Disconnected',d.reason\vert{}\vert{}'Your session ended.',true,false); } }; ws.onclose=()=>{ if(!kicked) setTimeout(connectWS,3000); }; } connectWS();  function applyPresence(live,viewers){ $('liveBadge').innerText=live?'🔴 LIVE':'WAITING'; $('liveBadge').className='pill'+(live?' live':''); $('vCount').innerText=`${viewers} watching`;
+      document.querySelector(`[data-mid="${d.id}"]`)?.remove();
+    }else if(d.type==='chat_clear'){
+      $('chatLog').innerHTML='';
+    }else if(d.type==='poll'){
+      if(!d.poll || (currentPoll && currentPoll.id!==d.poll.id)) myVote=null;
+      renderPoll(d.poll);
+    }else if(d.type==='vote_ok'){
+      myVote=d.optionIdx;
+      if(currentPoll && currentPoll.id===d.pollId) renderPoll(currentPoll);
+    }else if(d.type==='err'){
+      appendSys(d.message);
+    }else if(d.type==='kicked'){
+      kicked=true;
+      stopPlayer();
+      showOverlay('Disconnected',d.reason||'Your session ended.',true,false);
+    }
+  };
+  ws.onclose=()=>{ if(!kicked) setTimeout(connectWS,3000); };
+}
+connectWS();
+
+function applyPresence(live,viewers){
+  $('liveBadge').innerText=live?'🔴 LIVE':'WAITING';
+  $('liveBadge').className='pill'+(live?' live':'');
+  $('vCount').innerText=`${viewers} watching`;
 }
 function applyState(st,muted){
   roomState=st;
@@ -187,7 +209,16 @@ function applyState(st,muted){
   const disabled=!st.chatEnabled || !!muted;
   $('chatInput').disabled=disabled; $('sendBtn').disabled=disabled;
   $('chatInput').placeholder=muted?'You are muted':(!st.chatEnabled?'Chat is disabled':'Say something…');
-  $('chatStatus').innerText=!st.chatEnabled?'Disabled':(st.slowMode?`Slow: ${st.slowMode}s`:'Open'); } function appendMsg(m){ const log=$('chatLog'); const nearBottom=log.scrollHeight-log.scrollTop-log.clientHeight<60; const el=document.createElement('div'); const isHost=m.role==='subscriber'\vert{}\vert{}m.role==='admin'; el.className='cmsg'+(isHost?' host':''); el.dataset.mid=m.id; el.innerHTML=`<b>${esc(m.username)}${isHost?' [HOST]':''}:</b>${esc(m.text)}`;
+  $('chatStatus').innerText=!st.chatEnabled?'Disabled':(st.slowMode?`Slow: ${st.slowMode}s`:'Open');
+}
+function appendMsg(m){
+  const log=$('chatLog');
+  const nearBottom=log.scrollHeight-log.scrollTop-log.clientHeight<60;
+  const el=document.createElement('div');
+  const isHost=m.role==='subscriber'||m.role==='admin';
+  el.className='cmsg'+(isHost?' host':'');
+  el.dataset.mid=m.id;
+  el.innerHTML=`<b>${esc(m.username)}${isHost?' [HOST]':''}:</b> ${esc(m.text)}`;
   log.appendChild(el);
   if(log.children.length>200) log.removeChild(log.firstChild);
   if(nearBottom) log.scrollTop=log.scrollHeight;
@@ -215,11 +246,11 @@ function renderPoll(p){
     const pct=p.total?Math.round((c/p.total)*100):0;
     const mine=myVote===i;
     return `<button class="popt ${mine?'mine':''}" ${showResults?'disabled':''} onclick="vote(${p.id},${i})">
-      \${showResults?`<div class="fill" style="width:${pct}%"></div>`:''}
-      <div class="row"><span>\${mine?'✓ ':''}${esc(opt)}</span>${showResults?`<span>${pct}% (${c})</span>`:''}</div>
+      ${showResults?`<div class="fill" style="width:${pct}%"></div>`:''}
+      <div class="row"><span>${mine?'✓ ':''}${esc(opt)}</span>${showResults?`<span>${pct}% (${c})</span>`:''}</div>
     </button>`;
   }).join('');
-  $('pollBox').innerHTML=`<div class="poll-q"><span>📊 \${esc(p.question)}</span><span style="color:#888">${p.status==='closed'?'Closed':p.total+' votes'}</span></div>${optsHtml}`;
+  $('pollBox').innerHTML=`<div class="poll-q"><span>📊 ${esc(p.question)}</span><span style="color:#888">${p.status==='closed'?'Closed':p.total+' votes'}</span></div>${optsHtml}`;
 }
 function vote(pollId,optionIdx){
   if(!ws||ws.readyState!==1)return;
