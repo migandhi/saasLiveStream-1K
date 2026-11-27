@@ -1,0 +1,9 @@
+{
+  "name": "saas-livestream-1k-backend",
+  "type": "module",
+  "dependencies": {
+    "express": "^4.21.2",
+    "better-sqlite3": "^11.7.0",
+    "ws": "^8.23.0"
+  }
+}
